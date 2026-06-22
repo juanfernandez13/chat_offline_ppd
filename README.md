@@ -92,42 +92,65 @@ registrados são restaurados na próxima execução.
 
 ## 4. Arquitetura
 
+```mermaid
+flowchart TD
+    L["🚀 Launcher\n(menu inicial)"]
+    S["🖥️ ServidorMensagens\n(processo único)"]
+    RMI["Serviço RMI\nServicoMensagens\nporta 1099"]
+    MOM["Broker ActiveMQ\n(MOM embarcado)\ntcp://localhost:61616"]
+    FA["📬 fila.alice"]
+    FB["📬 fila.bob"]
+    CA["💬 ClienteChat\nalice"]
+    CB["💬 ClienteChat\nbob"]
+
+    L -->|inicia| S
+    L -->|abre| CA
+    L -->|abre| CB
+
+    S --> RMI
+    S --> MOM
+    MOM --> FA
+    MOM --> FB
+
+    CA -- "conectar / enviar /\nmudarStatus (RMI)" --> RMI
+    CB -- "conectar / enviar /\nmudarStatus (RMI)" --> RMI
+
+    RMI -- "callback.receberMensagem\n(RMI inverso)" --> CA
+    RMI -- "callback.receberMensagem\n(RMI inverso)" --> CB
 ```
-            ClienteChat (alice)                      ClienteChat (bob)
-            ┌──────────────────┐                    ┌──────────────────┐
-            │ UI Swing         │                    │ UI Swing         │
-            │ stub RMI ────────┼───┐            ┌───┼── stub RMI       │
-            │ CallbackImpl ◄───┼─┐ │            │ ┌─┼─► CallbackImpl   │
-            └──────────────────┘ │ │            │ │ └──────────────────┘
-                                 │ ▼            ▼ │
-                          ┌──────┴────────────────┴──────┐
-                          │   ServidorMensagens (RMI)    │
-                          │  ┌────────────────────────┐  │
-                          │  │  Broker ActiveMQ (MOM) │  │
-                          │  │  fila.alice  fila.bob  │  │
-                          │  └────────────────────────┘  │
-                          └──────────────────────────────┘
+
+### Fluxo de uma mensagem (`ServidorMensagens.rotear`)
+
+```mermaid
+sequenceDiagram
+    participant Alice as ClienteChat (alice)
+    participant Srv as ServidorMensagens
+    participant MOM as Broker ActiveMQ
+    participant Bob as ClienteChat (bob)
+
+    Alice->>Srv: enviar("alice", "bob", texto) [RMI]
+
+    alt bob está ONLINE
+        Srv->>Bob: callback.receberMensagem(texto, daFila=false) [RMI]
+        Note over Bob: mensagem exibida na hora
+    else bob está OFFLINE
+        Srv->>MOM: enfileirar → fila.bob [JMS]
+        Note over MOM: TextMessage aguarda na fila
+        Bob->>Srv: mudarStatus("bob", online) [RMI]
+        Srv->>MOM: drenar fila.bob [JMS]
+        MOM-->>Srv: mensagens pendentes
+        Srv->>Bob: callback.receberMensagem(texto, daFila=true) [RMI]
+        Note over Bob: marcada como "(estava na sua fila offline)"
+    end
 ```
 
 * **Cliente → Servidor (RMI):** `conectar`, `enviar`, `mudarStatus`,
   `estaOnline`, `desconectar` (interface `ServicoMensagens`).
 * **Servidor → Cliente (callback RMI):** `receberMensagem` e `statusContato`
-  (interface `ClienteCallback`), no mesmo estilo dos callbacks do projeto Dara.
+  (interface `ClienteCallback`).
 * **Servidor → MOM (JMS):** uma `Queue` por cliente (`fila.<nome>`), no broker
-  ActiveMQ embarcado — mesmo middleware do Projeto MOM, agora com filas
-  ponto-a-ponto em vez de tópicos pub-sub, pois cada mensagem tem um único
-  destinatário.
-
-### Fluxo de uma mensagem (`ServidorMensagens.rotear`)
-
-1. `alice` chama `servico.enviar("alice", "bob", texto)` via RMI.
-2. O servidor verifica o status de `bob`:
-   * **online** → chama `callbackDeBob.receberMensagem(...)` → entrega na hora;
-   * **offline** → cria um `TextMessage` (com propriedades `remetente` e
-     `timestamp`) e o envia para a `fila.bob` no broker.
-3. Quando `bob` fica online (`mudarStatus`) ou entra no sistema (`conectar`),
-   o servidor **drena** a `fila.bob` com um consumidor JMS e entrega cada
-   mensagem pelo callback, marcando `daFila = true`.
+  ActiveMQ embarcado — filas ponto-a-ponto em vez de tópicos pub-sub, pois
+  cada mensagem tem um único destinatário.
 
 A drenagem usa `CLIENT_ACKNOWLEDGE`: cada mensagem só é confirmada no broker
 **depois** que o callback do cliente a aceitou — se o cliente cair no meio da
@@ -169,4 +192,3 @@ entrega, o que não foi confirmado volta para a fila.
   no próximo envio, passa a tratá-lo como offline e enfileira a mensagem.
 * Nomes de contato aceitam letras, números, `-` e `_` (viram parte do nome da
   fila no broker).
-# chat_offline_ppd
