@@ -1,6 +1,6 @@
 # Projeto Final — Mensagens com Controle Offline (Programação Paralela e Distribuída)
 
-Projeto Final — IFCE, Engenharia de Computação, 2025.2. Prof. Cidcley T. de Souza.
+Projeto Final — IFCE, Engenharia de Computação, 2026.1. Prof. Cidcley T. de Souza.
 
 Sistema de troca de mensagens em que cada cliente possui um **nome de contato**
 e uma **lista de amigos** sempre visível na tela. A comunicação tem uma **parte
